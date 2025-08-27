@@ -1,79 +1,73 @@
-QBCore = exports['qb-core']:GetCoreObject()
+local QBCore = exports['qb-core']:GetCoreObject()
 
-RegisterServerEvent('tropic-shopping:checkout')
-AddEventHandler('tropic-shopping:checkout', function(storeKey, items)
+RegisterNetEvent('tropic-shopping:checkout', function(storeKey, items)
     local src = source
-    local xPlayer = QBCore.Functions.GetPlayer(src)
-
-    if not xPlayer then
-        TriggerClientEvent('ox_lib:notify', src, { title = "Error", description = "Player not found.", type = 'error' })
-        return
+    local Player = QBCore.Functions.GetPlayer(src)
+    if not Player then 
+        return TriggerClientEvent('ox_lib:notify', src, { title = "Error", description = "Player not found.", type = 'error' })
     end
 
     local store = Config.Stores[storeKey]
-    if not store then
-        TriggerClientEvent('ox_lib:notify', src, { title = "Error", description = "Invalid store.", type = 'error' })
-        return
+    if not store then 
+        return TriggerClientEvent('ox_lib:notify', src, { title = "Error", description = "Invalid store.", type = 'error' })
     end
 
-    local totalCost = 0
-    for itemName, itemData in pairs(items) do
-        local itemFound = false
+    local totalCost, validItems = 0, {}
 
+    for itemName, itemData in pairs(items or {}) do
+        if type(itemData.count) ~= 'number' or itemData.count <= 0 then
+            return TriggerClientEvent('ox_lib:notify', src, { title = "Error", description = "Invalid quantity for item: " .. itemName, type = 'error' })
+        end
+
+        local found, price = false, 0
         for _, zone in pairs(store.zones) do
             for _, zoneItem in pairs(zone.items) do
                 if zoneItem.name == itemName then
-                    itemFound = true
-                    if type(itemData.count) ~= 'number' or itemData.count <= 0 then
-                        TriggerClientEvent('ox_lib:notify', src, { title = "Error", description = "Invalid quantity for item: " .. itemName, type = 'error' })
-                        return
-                    end
-                    totalCost = totalCost + (zoneItem.price * itemData.count)
+                    found, price = true, zoneItem.price
+                    break
                 end
             end
+            if found then break end
         end
 
-        if not itemFound then
-            TriggerClientEvent('ox_lib:notify', src, { title = "Error", description = "Invalid item: " .. itemName, type = 'error' })
-            return
+        if not found then
+            return TriggerClientEvent('ox_lib:notify', src, { title = "Error", description = "Invalid item: " .. itemName, type = 'error' })
         end
+
+        totalCost += (price * itemData.count)
+        validItems[#validItems+1] = { name = itemName, count = itemData.count }
     end
 
     if totalCost <= 0 then
-        TriggerClientEvent('ox_lib:notify', src, { title = "Error", description = "Invalid total cost.", type = 'error' })
-        return
+        return TriggerClientEvent('ox_lib:notify', src, { title = "Error", description = "Invalid total cost.", type = 'error' })
     end
 
     if Config.Inventory == 'ox' then
         if not exports.ox_inventory:RemoveItem(src, 'cash', totalCost) then
-            TriggerClientEvent('ox_lib:notify', src, { title = "Error", description = "Not enough money.", type = 'error' })
-            return
+            return TriggerClientEvent('ox_lib:notify', src, { title = "Error", description = "Not enough money.", type = 'error' })
         end
 
-        for itemName, itemData in pairs(items) do
-            if not exports.ox_inventory:CanCarryItem(src, itemName, itemData.count) then
-                TriggerClientEvent('ox_lib:notify', src, { title = "Error", description = "Not enough space for item: " .. itemName, type = 'error' })
-                return
+        for _, v in ipairs(validItems) do
+            if not exports.ox_inventory:CanCarryItem(src, v.name, v.count) then
+                return TriggerClientEvent('ox_lib:notify', src, { title = "Error", description = "Not enough space for item: " .. v.name, type = 'error' })
             end
         end
 
-        for itemName, itemData in pairs(items) do
-            exports.ox_inventory:AddItem(src, itemName, itemData.count)
+        for _, v in ipairs(validItems) do
+            exports.ox_inventory:AddItem(src, v.name, v.count)
         end
 
     elseif Config.Inventory == 'qb' then
-        if not xPlayer.Functions.RemoveMoney("cash", totalCost) then
-            TriggerClientEvent('ox_lib:notify', src, { title = "Error", description = "Not enough money.", type = 'error' })
-            return
+        if not Player.Functions.RemoveMoney("cash", totalCost) then
+            return TriggerClientEvent('ox_lib:notify', src, { title = "Error", description = "Not enough money.", type = 'error' })
         end
 
-        for itemName, itemData in pairs(items) do
-            if not xPlayer.Functions.AddItem(itemName, itemData.count) then
-                TriggerClientEvent('ox_lib:notify', src, { title = "Error", description = "Not enough space for item: " .. itemName, type = 'error' })
-                return
+        for _, v in ipairs(validItems) do
+            if not Player.Functions.AddItem(v.name, v.count) then
+                return TriggerClientEvent('ox_lib:notify', src, { title = "Error", description = "Not enough space for item: " .. v.name, type = 'error' })
             end
         end
     end
 
-    TriggerClientEvent('ox_lib:notify', src, { title = "Success", description = "Purchase complete! Total cost: $" .. totalCost, type = 'success' })
+    TriggerClientEvent('ox_lib:notify', src, { title = "Success", description = ("Purchase complete! Total cost: $%s"):format(totalCost), type = 'success' })
 end)
